@@ -181,3 +181,128 @@ barplot(table(payOffStatusData$payoff_time),
         col = color_pay_off_status,
         names.arg = c("Active (0)",  "Payoff (1)"),
         las = 1)
+
+###################################################### 3.2. Data Preprocessing 
+################# 3.2.1. Checking Missing Value
+missing_summary <- colSums(is.na(mortgage_payback_data))
+data.frame(Missing_Count = missing_summary, 
+           Missing_Percent = paste0(round((missing_summary / nrow(mortgage_payback_data)) * 100, 2), "%"))
+
+# grab records with missing LTV_time
+ltv_time_missing <- mortgage_payback_data[is.na(mortgage_payback_data$LTV_time), ]
+#View(ltv_missing)
+table(ltv_time_missing$investor_orig_time)
+table(ltv_time_missing$balance_orig_time)
+table(ltv_time_missing$status_time)
+table(ltv_time_missing$payoff_time)
+table(ltv_time_missing$default_time)
+#View(ltv_time_missing)
+
+#length(unique(mortgage_payback_data$id))
+#################  3.2.2. Handling Missing
+missing_ids <- unique(ltv_time_missing$id)
+length(missing_ids)
+# let me check if those ids have LTV_time missing for all their records
+ltv_missing_check <- mortgage_payback_data %>%
+  filter(id %in% missing_ids) %>%
+  group_by(id) %>%
+  summarise(
+    total_records = n(),
+    missing_count = sum(is.na(LTV_time)),
+    all_missing = all(is.na(LTV_time))
+  )
+
+# View result
+#ltv_missing_check
+# Remove records with missing LTV_time
+mortgage_payback_data <- mortgage_payback_data[!is.na(mortgage_payback_data$LTV_time), ]
+
+# Verify removal
+sum(is.na(mortgage_payback_data$LTV_time))  
+#str(mortgage_payback_data)
+#length(unique(mortgage_payback_data$id))
+
+#################  3.2.3. Checking Empty Strings
+sum(mortgage_payback_data == "", na.rm = TRUE)
+
+#################  3.2.4. checking zeros entire data set except categorical variables 
+check_zeros <- function(data, numeric_cols) {
+  zeros_summary <- colSums(data[numerical_features] == 0, na.rm = TRUE)
+  # summary with percent
+  zeros_df <- data.frame(
+    Column = names(zeros_summary),
+    Zero_Count = zeros_summary,
+    Zero_Percent = paste0(round((zeros_summary / nrow(data)) * 100, 2), "%")
+  )
+  rownames(zeros_df) <- NULL
+  return(zeros_df)
+}
+
+zeros_df <- check_zeros(mortgage_payback_data, numerical_features)
+print(zeros_df)
+
+# grab records with orig_time == 0 
+zero_orig_records <- mortgage_payback_data[mortgage_payback_data$orig_time == 0, ]
+#View(zero_orig_records)
+
+# grab records with balance_time == 0 
+zero_balance_time <- mortgage_payback_data[mortgage_payback_data$balance_time == 0, ]
+table(zero_balance_time$payoff_time)
+
+# grab records with LTV_time == 0 
+zero_LTV_time <- mortgage_payback_data[mortgage_payback_data$LTV_time == 0, ]
+table(zero_LTV_time$payoff_time)
+
+################# 3.2.5. Handling for Zeros 
+# records with balance_time == 0 
+zero_balance_time_records <- mortgage_payback_data[mortgage_payback_data$balance_time == 0, ]
+#View(zero_balance_time_records)
+
+# before the 285 total number records with payoff_time == 1, status_time == 2 and balance_time == 0
+sum(mortgage_payback_data$payoff_time == 1 & mortgage_payback_data$status_time == 2 & mortgage_payback_data$balance_time == 0)
+
+#Get ids where last record has balance_time == 0
+ids_to_update <- last_observations %>%
+  filter(balance_time == 0, payoff_time == 0, status_time == 0) %>%
+  pull(id)
+
+# only 37 id needs to update
+length(ids_to_update)
+
+# Update only the last observation for those IDs
+mortgage_payback_data <- mortgage_payback_data %>%
+  arrange(id, time) %>%
+  group_by(id) %>%
+  mutate(
+    is_last = row_number() == n(),
+    payoff_time = ifelse(is_last & id %in% ids_to_update, 1, payoff_time),
+    status_time = ifelse(is_last & id %in% ids_to_update, 2, status_time)
+  ) %>%
+  ungroup() %>%
+  dplyr::select(-is_last)
+
+# verify update on balance_time 285 + 37 = 322
+sum(mortgage_payback_data$payoff_time == 1 & mortgage_payback_data$status_time == 2 & mortgage_payback_data$balance_time == 0)
+
+################# 3.2.6. Outlier Detection
+# Function to calculate outlier count using IQR
+find_outliers <- function(x) {
+  q1 <- quantile(x, 0.25, na.rm = TRUE)
+  q3 <- quantile(x, 0.75, na.rm = TRUE)
+  iqr <- q3 - q1
+  sum(x < (q1 - 1.5*iqr) | x > (q3 + 1.5*iqr), na.rm = TRUE)
+}
+
+# apply function to all numeric columns
+outlier_counts <- sapply(mortgage_payback_data[numerical_features], find_outliers)
+
+# create summary table without duplicating column names
+outliers_df <- data.frame(
+  Variable = names(outlier_counts),
+  Outlier_Count = as.numeric(outlier_counts),
+  Min_Value = round(sapply(mortgage_payback_data[numerical_features], function(x) min(x, na.rm = TRUE)), 2),
+  Max_Value = round(sapply(mortgage_payback_data[numerical_features], function(x) max(x, na.rm = TRUE)), 2),
+  Percentage = paste0(round(as.numeric(outlier_counts) / nrow(mortgage_payback_data) * 100, 2), "%"),
+  row.names = NULL
+)
+print(outliers_df)
