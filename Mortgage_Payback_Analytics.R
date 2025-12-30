@@ -306,3 +306,150 @@ outliers_df <- data.frame(
   row.names = NULL
 )
 print(outliers_df)
+
+# Predictor Analysis and Relevancy
+# 4.3.1. Correlation Analysis for Numeric Predictors
+mortage_aggregate <- mortgage_payback_data %>%
+  group_by(id) %>%
+  summarise(
+    # Origination (first)
+    FICO = first(FICO_orig_time),
+    LTV_orig = first(LTV_orig_time),
+    rate_orig = first(Interest_Rate_orig_time),
+    balance_orig = first(balance_orig_time),
+    hpi_orig = first(hpi_orig_time),
+    mat_time = first(mat_time),
+    investor_orig_time = first(investor_orig_time),
+    REtype_SF_orig_time = first(REtype_SF_orig_time),
+    REtype_PU_orig_time = first(REtype_PU_orig_time),
+    REtype_CO_orig_time = first(REtype_CO_orig_time),
+    
+    # Final state (last)
+    balance_final = last(balance_time),
+    LTV_final = last(LTV_time),
+    rate_final = last(interest_rate_time),
+    hpi_final = last(hpi_time),
+    gdp_final = last(gdp_time),
+    uer_final = last(uer_time),
+    
+    # Time span
+    loan_age_months = max(time) - min(time),
+    
+    default_time   = last(default_time),
+    status_time    = last(status_time),
+    #target 
+    payoff_time    = last(payoff_time),
+    .groups = "drop"
+  )
+# let me track dynamic features
+mortage_aggregate <- mortage_aggregate %>%
+  mutate(
+    balance_reduction = (balance_orig - balance_final) / balance_orig,
+    LTV_change = LTV_final - LTV_orig,
+    rate_change = rate_final - rate_orig,
+    hpi_appreciation = (hpi_final - hpi_orig) / hpi_orig
+  )
+
+#filter
+mortage_aggregate_final <- mortage_aggregate %>%
+  filter(default_time == 1 | payoff_time == 1)
+
+# Data Aggregation Strategy
+#View(mortgage_payback_data)
+borrower_id_2 <- mortgage_payback_data %>% filter(id == 2)
+
+borrower_agg_id_2 <- mortage_aggregate_final %>% filter(id == 2)
+
+#View(borrower_id_2)
+#View(borrower_agg_id_2)
+#View(mortage_aggregate_final)
+final_numeric_features <- c(
+  "FICO", "LTV_orig", "rate_orig", "balance_orig", "mat_time", "hpi_orig",
+  "balance_final", "LTV_final", "rate_final", "hpi_final", "gdp_final", "uer_final",
+  "loan_age_months", "balance_reduction", "LTV_change", "rate_change", "hpi_appreciation"
+)
+
+mortgage_payback_borrower_num <- mortage_aggregate_final[, final_numeric_features]
+cor_matrix <- cor(mortgage_payback_borrower_num, use = "complete.obs")
+cor_matrix
+
+options(repr.plot.width = 16, repr.plot.height = 14)  
+par(mfrow = c(1, 1), mar = c(2, 2, 2, 2))
+
+# Increase text size
+corrplot(cor_matrix,
+         method = "color",
+         type = "upper",
+         order = "hclust",
+         tl.cex = 0.7,
+         tl.col = "black",
+         addCoef.col = "black",
+         number.cex = 0.6,
+         mar = c(0,0,2,0),
+         col = colorRampPalette(c("blue", "white", "red"))(200))
+
+#View(mortage_aggregate_final)
+#4.3.3. Categorical Predictors Relevancy
+mortgage_payback_data_categorical <- mortage_aggregate_final
+categorical_features <- c('REtype_CO_orig_time', 'REtype_PU_orig_time', 'REtype_SF_orig_time', 'investor_orig_time', 'payoff_time')
+
+# Ensure all categorical variables are factors
+mortgage_payback_data_categorical[categorical_features] <- 
+  lapply(mortgage_payback_data_categorical[categorical_features], as.factor)
+
+# Chi-squared test for REtype_CO_orig_time and payoff_time
+co_orig_chi <- chisq.test(mortgage_payback_data_categorical$REtype_CO_orig_time, mortgage_payback_data_categorical$payoff_time)
+print("Chi-squared test for REtype_CO_orig_time and payoff_time:")
+print(co_orig_chi)
+
+# Chi-squared test for REtype_PU_orig_time and payoff_time
+pu_orig_chi <- chisq.test(mortgage_payback_data_categorical$REtype_PU_orig_time, mortgage_payback_data_categorical$payoff_time)
+print("Chi-squared test for REtype_PU_orig_time and payoff_time:")
+print(pu_orig_chi)
+
+# Chi-squared test for REtype_SF_orig_time and payoff_time
+sf_orig_chi <- chisq.test(mortgage_payback_data_categorical$REtype_SF_orig_time, mortgage_payback_data_categorical$payoff_time)
+print("Chi-squared test for REtype_SF_orig_time and payoff_time:")
+print(sf_orig_chi)
+
+# Chi-squared test for investor_orig_time and payoff_time
+inv_orig_chi <- chisq.test(mortgage_payback_data_categorical$investor_orig_time, mortgage_payback_data_categorical$payoff_time)
+print("Chi-squared test for investor_orig_time and payoff_time:")
+print(inv_orig_chi)
+
+#5.2. Data Transformation
+##########Feature Importance from Random Forest : 
+## Based on correlation matrix removed features are : 
+remove_vars <- c("id","rate_final","balance_final","LTV_final","rate_orig","hpi_final","hpi_orig","default_time","status_time")
+mortage_aggregate_imp <- mortage_aggregate_final
+mortage_aggregate_imp <- mortage_aggregate_imp[, !(names(mortage_aggregate_imp) %in% remove_vars)]
+mortage_aggregate_imp$investor_orig_time <- as.factor(mortage_aggregate_imp$investor_orig_time)
+mortage_aggregate_imp$REtype_SF_orig_time <- as.factor(mortage_aggregate_imp$REtype_SF_orig_time)
+mortage_aggregate_imp$REtype_PU_orig_time      <- as.factor(mortage_aggregate_imp$REtype_PU_orig_time)
+mortage_aggregate_imp$REtype_CO_orig_time             <- as.factor(mortage_aggregate_imp$REtype_CO_orig_time)
+mortage_aggregate_imp$payoff_time             <- as.factor(mortage_aggregate_imp$payoff_time)
+
+#str(mortage_aggregate_imp)
+# Train Random Forest model
+set.seed(2025)
+rf_model <- randomForest(payoff_time ~ ., 
+                         data = mortage_aggregate_imp, 
+                         importance = TRUE)
+rf_importance <- randomForest::importance(rf_model)
+# Convert to data frame
+rf_importance_df <- data.frame(
+  Variable = rownames(rf_importance),
+  MeanDecreaseAccuracy = rf_importance[, "MeanDecreaseAccuracy"],
+  MeanDecreaseGini     = rf_importance[, "MeanDecreaseGini"]
+)
+# Sort by MeanDecreaseAccuracy
+rf_importance_df <- rf_importance_df[order(rf_importance_df$MeanDecreaseAccuracy, decreasing = TRUE), ]
+rownames(rf_importance_df) <- NULL
+print(rf_importance_df)
+
+# Final feature selected Based on correlation matrix, random forest 
+remove_features <- c("id","rate_final","balance_final","LTV_final","rate_orig","hpi_final","hpi_orig","REtype_SF_orig_time","REtype_CO_orig_time","REtype_PU_orig_time","default_time","status_time")
+mortage_data_class <- mortage_aggregate_final
+mortage_data_class <- mortage_data_class[, !(names(mortage_data_class) %in% remove_features)]
+#View(mortage_data_class)
+#table(mortage_data_class$payoff_time)
