@@ -529,3 +529,97 @@ X_test_cat  <- factorize_predictors(test_data[, !names(test_data) %in% "payoff_t
 y_train_cat <- factor(train_data$payoff_time, levels = c(0, 1))
 y_val_cat   <- factor(val_data$payoff_time, levels = c(0, 1))
 y_test_cat  <- factor(test_data$payoff_time, levels = c(0, 1))
+
+##################################### Logistic Regression
+X_train_cat_lr <- X_train_cat
+X_val_cat_lr   <- X_val_cat
+X_test_cat_lr  <- X_test_cat
+library(glmnet)
+library(pROC)
+
+# Fit default Logistic Regression model
+lr_model_default <- glm(payoff_time ~ ., 
+                        data = cbind(X_train_cat_lr, payoff_time = y_train_cat),
+                        family = binomial)
+# Check convergence and print summary
+cat("Logistic Regression Default Model Summary:\n")
+summary(lr_model_default)
+
+# Evaluation function
+evaluate_lr <- function(model, X, y, threshold = 0.5) {
+  pred_prob <- predict(model, newdata = X, type = "response")
+  pred_class <- ifelse(pred_prob > threshold, 1, 0)
+  cm <- confusionMatrix(factor(pred_class), factor(y), positive = "1")
+  roc_obj <- roc(y, pred_prob, quiet = TRUE)
+  
+  metrics <- list(
+    Accuracy = cm$overall["Accuracy"],
+    Sensitivity = cm$byClass["Sensitivity"],
+    Specificity = cm$byClass["Specificity"],
+    Precision = cm$byClass["Precision"],
+    F1 = cm$byClass["F1"]
+  )
+  return(metrics)
+}
+
+# Evaluate default model
+lr_val_metrics <- evaluate_lr(lr_model_default, X_val_cat_lr, y_val_cat)
+cat("Logistic Regression Default Validation Metrics:\n")
+print(sapply(lr_val_metrics, round, 3)) 
+
+lr_test_metrics <- evaluate_lr(lr_model_default, X_test_cat_lr, y_test_cat)
+cat("Logistic Regression Default Test Metrics:\n")
+print(sapply(lr_test_metrics, round, 3))
+
+##################################### Tune Logistic Regression
+library(MASS)
+library(caret) 
+
+# Stepwise selection (both directions) on training data
+lr_model_step <- stepAIC(lr_model_default, direction = "both", trace = FALSE)
+cat("Logistic Regression Stepwise Model Summary:\n")
+summary(lr_model_step)
+
+#View(X_train_cat_lr)
+# Remove balance_orig (weak feature)
+X_train_final_lr <- X_train_cat_lr %>% dplyr::select(-balance_orig, -uer_final, -rate_change)
+X_val_final_lr   <- X_val_cat_lr %>% dplyr::select(-balance_orig, -uer_final, -rate_change)
+X_test_final_lr  <- X_test_cat_lr %>% dplyr::select(-balance_orig, -uer_final, -rate_change)
+
+# ReFit logistic regression model on selected features
+lr_model_final <- glm(payoff_time ~ ., 
+                      data = cbind(X_train_final_lr, payoff_time = y_train_cat),
+                      family = binomial)
+
+# Run stepwise AIC again
+lr_model_step_final <- stepAIC(lr_model_final, direction = "both", trace = FALSE)
+
+# Review final model summary
+cat("Final Stepwise Logistic Regression Summary:\n")
+summary(lr_model_step_final)
+
+thresholds <- seq(0.4, 0.6, by = 0.01)
+# Evaluate metrics for each threshold
+results_list <- lapply(thresholds, function(t) {
+  evaluate_lr(lr_model_step_final, X_val_final_lr, y_val_cat, threshold = t)
+})
+
+# Convert list to data.frame
+results <- do.call(rbind, results_list)
+results <- data.frame(Threshold = thresholds, results)
+
+# Now find best threshold for F1
+best_f1_idx <- which.max(results$F1)
+best_threshold <- results$Threshold[best_f1_idx]
+cat("Best threshold (F1-optimal) on validation set:", best_threshold, "\n")
+
+##################### Evaluate Final Model
+# Validation set metrics with tuned threshold
+#lr_val_metrics_tuned <- evaluate_lr(lr_model_step_final, X_val_final_lr, y_val_cat, threshold = best_threshold)
+#cat("Validation Metrics (Stepwise Model + Tuned Threshold):\n")
+#print(sapply(lr_val_metrics_tuned, round, 3))
+
+# Test set metrics with tuned threshold
+lr_test_metrics_tuned <- evaluate_lr(lr_model_step_final, X_test_final_lr, y_test_cat, threshold = best_threshold)
+cat("Test Metrics (Stepwise Model + Tuned Threshold):\n")
+print(sapply(lr_test_metrics_tuned, round, 3))
