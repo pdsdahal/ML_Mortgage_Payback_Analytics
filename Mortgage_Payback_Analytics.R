@@ -747,3 +747,107 @@ precision_tuned_test <- rf_tuned_test_metrics_cs$byClass["Precision"]
 print(rf_tuned_test_metrics_cs)
 print(f1_tuned_test)
 print(precision_tuned_test)
+
+##################################### Clustering
+#View(mortage_aggregate)
+library(dplyr)
+library(cluster)
+library(factoextra)
+library(tidyr)
+
+#As per Business Reduction
+mortage_clustering <- mortage_aggregate[mortage_aggregate$payoff_time == 1, ]
+mortage_clustering <- mortage_clustering[, !(names(mortage_clustering) %in% c("status_time", "default_time"))]
+
+# selected variables
+selected_vars <- c("FICO", "LTV_orig", "balance_reduction", "LTV_change","rate_change","hpi_appreciation","uer_final","loan_age_months")
+clustering_data <- mortage_clustering %>%
+  dplyr::select(all_of(selected_vars), payoff_time) %>%   # payoff_time kept for labeling
+  tidyr::drop_na()
+
+# Scale ONLY the clustering features
+scaled_clustering_data <- scale(clustering_data %>%  dplyr::select(all_of(selected_vars)))
+
+##################################### K-means Clustering initial K = 2
+set.seed(2025)
+kmeans_initial <- kmeans(scaled_clustering_data, centers = 2, nstart = 25)
+
+# center, size, and members of each cluster. 
+print(kmeans_initial$centers)   
+print(kmeans_initial$size)      
+print(head(kmeans_initial$cluster, 10))  
+
+# Transpose the cluster centers to plot features on x-axis
+matplot(t(kmeans_initial$centers), type = "l", lty = 1, col = 1:2,
+        main = "Cluster Profiles (k = 2)",
+        xlab = "Features",
+        ylab = "Scaled Value",
+        xaxt = "n")  
+
+# Add feature names as x-axis labels
+axis(1, at = 1:ncol(kmeans_initial$centers), labels = colnames(kmeans_initial$centers))
+
+# Add legend
+legend("topright", legend = paste("Cluster", 1:2), col = 1:2, lty = 1, bty = "n")
+
+# Compute silhouette values
+sil <- silhouette(kmeans_initial$cluster, dist(scaled_clustering_data))
+
+# Plot silhouette visualization
+plot(sil,
+     main = "Silhouette Plot for K-Means (k = 2)",
+     col = 1:2,
+     border = NA)
+
+# are silhouette values for each cluster and overall average silhouette
+summary(sil)
+
+##################################### K-means Clustering Best K
+#wss calculation
+set.seed(2025)
+wss <- numeric(6)
+for (k in 1:6) {
+  kmeans_determine_best_k <- kmeans(scaled_clustering_data, centers = k, nstart = 10,
+                                    algorithm = "MacQueen") 
+  wss[k] <- kmeans_determine_best_k$tot.withinss
+  cat("Completed k =", k, " wss :", wss[k], "\n")
+}
+# Plot WSS vs k
+plot(1:6, wss, type = "b", pch = 19,
+     xlab = "Number of clusters K",
+     ylab = "Total WSS",
+     main = "Elbow Method")
+
+#kmeans for best k = 3 based on elbow
+set.seed(2025)
+kmeans_optimal <- kmeans(scaled_clustering_data, centers = 3, nstart = 25)
+
+# Print cluster centers, sizes, and first 10 cluster memberships
+print(kmeans_optimal$centers)
+print(kmeans_optimal$size)
+print(head(kmeans_optimal$cluster, 10))
+
+# Transpose the cluster centers to plot features on x-axis
+matplot(t(kmeans_optimal$centers), type = "l", lty = 1, col = 1:3,
+        main = "Cluster Profiles (k = 3)",
+        xlab = "Features",
+        ylab = "Scaled Value",
+        xaxt = "n")  
+
+# Add feature names as x-axis labels
+axis(1, at = 1:ncol(kmeans_optimal$centers), labels = colnames(kmeans_optimal$centers))
+
+# Add legend
+legend("topright", legend = paste("Cluster", 1:3), col = 1:3, lty = 1, bty = "n")
+
+# Compute silhouette values for k = 3
+sil_opt_k <- silhouette(kmeans_optimal$cluster, dist(scaled_clustering_data))
+
+# Plot silhouette visualization
+plot(sil_opt_k,
+     main = "Silhouette Plot for K-Means (k = 3)",
+     col = 1:3,
+     border = NA)
+
+# Print silhouette values for each cluster and overall average
+summary(sil_opt_k)
