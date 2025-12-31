@@ -623,3 +623,127 @@ cat("Best threshold (F1-optimal) on validation set:", best_threshold, "\n")
 lr_test_metrics_tuned <- evaluate_lr(lr_model_step_final, X_test_final_lr, y_test_cat, threshold = best_threshold)
 cat("Test Metrics (Stepwise Model + Tuned Threshold):\n")
 print(sapply(lr_test_metrics_tuned, round, 3))
+
+##################################### Random Forest Classification
+X_train_rf_cls <- X_train_cat
+X_val_rf_cls   <- X_val_cat
+X_test_rf_cls  <- X_test_cat
+
+# Random Forest classification
+set.seed(123)
+rf_model_cls <- randomForest(x=X_train_rf_cls,
+                             y=y_train_cat, 
+                             ntree = 100,
+                             mtry = 4,
+                             nodesize = 3,
+                             importance = TRUE)
+print(rf_model_cls)
+
+# eval random forest on validation set
+rf_cls_val_pred <- predict(rf_model_cls, X_val_rf_cls)
+rf_cls_val_metrics <- confusionMatrix(rf_cls_val_pred, y_val_cat,positive = "1")
+precision_val <- rf_cls_val_metrics$byClass["Precision"]
+f1_val <- rf_cls_val_metrics$byClass["F1"]
+print(rf_cls_val_metrics)
+print(precision_val)
+print(f1_val)
+
+# eval random forest on test set
+rf_cls_test_pred <- predict(rf_model_cls, X_test_rf_cls)
+rf_cls_test_metrics <- confusionMatrix(rf_cls_test_pred, y_test_cat,positive = "1")
+precision_test <- rf_cls_test_metrics$byClass["Precision"] 
+f1_test <- rf_cls_test_metrics$byClass["F1"]
+print(rf_cls_test_metrics)
+print(precision_test)
+print(f1_test)
+
+##################################### Tuned Random Forest Classsification
+library(caret)
+library(ranger)
+
+# ensuring factor levels 
+y_train_cat <- factor(y_train_cat)
+y_val_cat   <- factor(y_val_cat)
+y_test_cat  <- factor(y_test_cat)
+
+# convert levels like 0/1 to valid names X0/ X1
+levels(y_train_cat) <- make.names(levels(y_train_cat))
+levels(y_val_cat)   <- make.names(levels(y_val_cat))
+levels(y_test_cat)  <- make.names(levels(y_test_cat))
+
+# combine features and target
+train_data_rf <- cbind(X_train_rf_cls, Purchase = y_train_cat)
+
+# Number of predictors
+p1 <- ncol(train_data_rf) - 1
+# hyperparameter grid
+tuneGridCs <- expand.grid(
+  mtry = c(floor(sqrt(p1)), floor(p1/3)),
+  splitrule = c("gini"),
+  min.node.size = c(5, 7)
+)
+
+# Number of trees to try separately
+ntree_values <- c(400, 500)
+
+# setup train control
+ctrl <- trainControl(
+  method = "cv",
+  number = 5,       
+  classProbs = TRUE 
+)
+# Loop over ntree values
+
+best_model <- NULL
+best_sensitivity <- -Inf
+best_params <- list()
+
+set.seed(123)
+for (ntree in ntree_values) {
+  
+  # Train Random Forest with caret
+  rf_model <- train(
+    Purchase ~ .,
+    data = train_data_rf,
+    method = "ranger",
+    tuneGrid = tuneGridCs,         
+    num.trees = ntree,
+    importance = "impurity",
+    trControl = ctrl,
+    metric = "Accuracy"
+  )
+  
+  # Evaluate on validation set
+  preds_val <- predict(rf_model, X_val_rf_cls)
+  cm_val <- confusionMatrix(preds_val, y_val_cat, positive = "X1")
+  sensitivity_val <- cm_val$byClass["Sensitivity"]
+  
+  # Keep best model based on Sensitivity
+  if (sensitivity_val > best_sensitivity) {
+    best_sensitivity <- sensitivity_val
+    best_model <- rf_model
+    best_params <- list(ntree = ntree, params = rf_model$bestTune)
+  }
+}
+
+cat("Best parameters based on validation set :")
+print(best_params)
+print(best_sensitivity)
+
+# evaluation on Validation set
+#rf_tuned_val_pred_cs <- predict(best_model, X_val_rf_cls)
+#rf_tuned_val_metrics_cs <- confusionMatrix(rf_tuned_val_pred_cs, y_val_cat, positive = "X1")
+#f1_tuned_val <- rf_tuned_val_metrics_cs$byClass["F1"]
+#precision_tuned_val <- rf_tuned_val_metrics_cs$byClass["Precision"] 
+#print(rf_tuned_val_metrics_cs)
+#print(f1_tuned_val)
+#print(precision_tuned_val)
+
+# evaluation on Test set
+rf_tuned_test_pred_cs <- predict(best_model, X_test_rf_cls)
+rf_tuned_test_metrics_cs <- confusionMatrix(rf_tuned_test_pred_cs, y_test_cat, positive = "X1")
+f1_tuned_test <- rf_tuned_test_metrics_cs$byClass["F1"]
+precision_tuned_test <- rf_tuned_test_metrics_cs$byClass["Precision"] 
+print(rf_tuned_test_metrics_cs)
+print(f1_tuned_test)
+print(precision_tuned_test)
