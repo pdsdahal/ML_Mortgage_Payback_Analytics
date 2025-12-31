@@ -453,3 +453,79 @@ mortage_data_class <- mortage_aggregate_final
 mortage_data_class <- mortage_data_class[, !(names(mortage_data_class) %in% remove_features)]
 #View(mortage_data_class)
 #table(mortage_data_class$payoff_time)
+
+###############Data Partition 
+strata_factor <- interaction(
+  mortage_data_class$payoff_time,
+  drop = TRUE
+)
+# perform a stratified 60/20/20 split
+set.seed(2025)
+splits <- partition(
+  y = strata_factor, 
+  p = c(train = 0.6, val = 0.2, test = 0.2),
+  type = "stratified"
+)
+# Extract partitions
+train_data <- mortage_data_class[splits$train, ]
+val_data   <- mortage_data_class[splits$val, ]
+test_data  <- mortage_data_class[splits$test, ]
+
+###################### let create summary
+# Partition sizes
+train_n <- nrow(train_data)
+val_n   <- nrow(val_data)
+test_n  <- nrow(test_data)
+
+# Total records
+total_n <- nrow(mortage_data_class)
+
+# Create summary table
+partition_summary <- data.frame(
+  Partition   = c("Training", "Validation", "Test"),
+  Records     = c(train_n, val_n, test_n),
+  Percentage  = round(c(train_n, val_n, test_n) / total_n * 100, 2)
+)
+
+print(partition_summary)
+#Verify distributions
+round(prop.table(table(train_data$investor_orig_time)) * 100, 2)
+round(prop.table(table(val_data$investor_orig_time)) * 100, 2)
+round(prop.table(table(test_data$investor_orig_time)) * 100, 2)
+
+round(prop.table(table(train_data$payoff_time)) * 100, 2)
+round(prop.table(table(val_data$payoff_time)) * 100, 2)
+round(prop.table(table(test_data$payoff_time)) * 100, 2)
+
+# Check overlap between splits
+length(intersect(splits$train, splits$test))
+length(intersect(splits$train, splits$val)) 
+length(intersect(splits$val, splits$test))
+
+# Check coverage
+length(unique(c(splits$train, splits$val, splits$test))) == nrow(mortage_data_class)
+
+# Algorithm Selected 
+# 7.1. Classification Algorithms
+# 7.1.1. Logistic Regression
+# 7.1.2. Random Forest 
+
+# 7.2. Clustering Algorithms
+# 7.2.1. K-Means
+
+cat("Remaining observations in dataset:", nrow(mortage_data_class))
+
+#  factors common method
+factorize_predictors <- function(df) {
+  df$investor_orig_time <- as.factor(df$investor_orig_time)
+  return(df)
+}
+# Apply function
+X_train_cat <- factorize_predictors(train_data[, !names(train_data) %in% "payoff_time"])
+X_val_cat   <- factorize_predictors(val_data[, !names(val_data) %in% "payoff_time"])
+X_test_cat  <- factorize_predictors(test_data[, !names(test_data) %in% "payoff_time"])
+
+# Targets as factors (with explicit levels for consistency)
+y_train_cat <- factor(train_data$payoff_time, levels = c(0, 1))
+y_val_cat   <- factor(val_data$payoff_time, levels = c(0, 1))
+y_test_cat  <- factor(test_data$payoff_time, levels = c(0, 1))
